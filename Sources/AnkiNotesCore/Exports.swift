@@ -13,6 +13,8 @@ public struct AnkiNotesCLI: ParsableCommand {
             ListTags.self,
             StatsCommand.self,
             ExportCards.self,
+            BackupCommand.self,
+            RestoreCommand.self,
         ]
     )
 
