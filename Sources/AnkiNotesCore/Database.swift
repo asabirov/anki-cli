@@ -266,6 +266,50 @@ public final class AnkiDatabase {
         return tags
     }
 
+    // MARK: - Media
+
+    /// Get media blobs attached to a flashcard via ZMEDIA table.
+    public func mediaForFlashcard(id: Int64) throws -> [(filename: String, data: Data)] {
+        let sql = "SELECT ZFNAME, ZDATA FROM ZMEDIA WHERE ZCARD = ? AND ZDATA IS NOT NULL AND LENGTH(ZDATA) > 100"
+        var results: [(String, Data)] = []
+        try query(sql, params: [id]) { stmt in
+            let fname = columnText(stmt, 0)
+            if let blob = sqlite3_column_blob(stmt, 1) {
+                let len = Int(sqlite3_column_bytes(stmt, 1))
+                results.append((fname, Data(bytes: blob, count: len)))
+            }
+        }
+        return results
+    }
+
+    /// Get the embedded image data from ZIMAGEDATA column on a flashcard.
+    public func imageDataForFlashcard(id: Int64) throws -> Data? {
+        let sql = "SELECT ZIMAGEDATA FROM ZCOREDATAFLASHCARD WHERE Z_PK = ? AND ZIMAGEDATA IS NOT NULL AND LENGTH(ZIMAGEDATA) > 100"
+        var result: Data?
+        try query(sql, params: [id]) { stmt in
+            let len = Int(sqlite3_column_bytes(stmt, 0))
+            guard len > 2, let blob = sqlite3_column_blob(stmt, 0) else { return }
+            let data = Data(bytes: blob, count: len)
+            // Strip 1-byte length prefix if present (data starts with 0x01 then JPEG FFD8)
+            if data[0] == 0x01 && data[1] == 0xFF {
+                result = Data(data.dropFirst())
+            } else {
+                result = data
+            }
+        }
+        return result
+    }
+
+    /// Get all flashcard IDs (for full extraction).
+    public func allFlashcardIDs() throws -> [Int64] {
+        let sql = "SELECT Z_PK FROM ZCOREDATAFLASHCARD ORDER BY Z_PK"
+        var ids: [Int64] = []
+        try query(sql, params: []) { stmt in
+            ids.append(sqlite3_column_int64(stmt, 0))
+        }
+        return ids
+    }
+
     // MARK: - Stats
 
     public func getStats() throws -> DeckStats {
