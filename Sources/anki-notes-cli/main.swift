@@ -1,0 +1,3 @@
+import AnkiNotesCore
+
+AnkiNotesCLI.main()
