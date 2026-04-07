@@ -3,7 +3,7 @@ import Foundation
 
 public struct StatsCommand: ParsableCommand {
     public static let configuration = CommandConfiguration(
-        commandName: "stats",
+        commandName: "dashboard",
         abstract: "Show deck statistics dashboard"
     )
 
@@ -128,48 +128,69 @@ public struct StatsCommand: ParsableCommand {
     // MARK: - Timeline
 
     private func printTimeline(_ d: DashboardStats) {
-        let past = d.pastReviews
-        let future = d.futureDue
+        let reviewed = d.pastReviews
+        let duePast = d.pastDue
+        let dueFuture = d.futureDue
 
-        guard !past.isEmpty || !future.isEmpty else { return }
+        guard !reviewed.isEmpty || !duePast.isEmpty || !dueFuture.isEmpty else { return }
 
-        // Find max for scaling
-        let allCounts = past.map(\.count) + future.map(\.count)
-        let maxCount = allCounts.max() ?? 1
-        let barMax = 30
+        // Build a merged map of dates
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let todayStr = dateFormatter.string(from: Date())
+        let shortFormatter = DateFormatter()
+        shortFormatter.dateFormat = "MM-dd"
 
-        print("Review Timeline (14 days)")
-
-        // Past (reviewed cards)
-        if !past.isEmpty {
-            print("  Past (reviewed)")
-            for day in past {
-                let shortDate = String(day.date.suffix(5))  // MM-DD
-                let filled = Int(Double(day.count) / Double(maxCount) * Double(barMax))
-                let bar = String(repeating: "▓", count: filled)
-                print("  \(shortDate) \(bar) \(day.count)")
-            }
+        // Collect all dates in order (past 14 + future 14)
+        var allDates: [String] = []
+        for i in -13...14 {
+            let date = Calendar.current.date(byAdding: .day, value: i, to: Date())!
+            allDates.append(dateFormatter.string(from: date))
         }
 
-        // Separator / today marker
-        let today = {
-            let f = DateFormatter()
-            f.dateFormat = "MM-dd"
-            return f.string(from: Date())
-        }()
-        print("  \(today) ── today ──")
+        let reviewedMap = Dictionary(reviewed.map { ($0.date, $0.count) }, uniquingKeysWith: +)
+        let duePastMap = Dictionary(duePast.map { ($0.date, $0.count) }, uniquingKeysWith: +)
+        let dueFutureMap = Dictionary(dueFuture.map { ($0.date, $0.count) }, uniquingKeysWith: +)
 
-        // Future (due cards)
-        if !future.isEmpty {
-            print("  Upcoming (due)")
-            for day in future {
-                let shortDate = String(day.date.suffix(5))
-                let filled = Int(Double(day.count) / Double(maxCount) * Double(barMax))
-                let bar = String(repeating: "░", count: filled)
-                print("  \(shortDate) \(bar) \(day.count)")
+        // Find max for bar scaling
+        let allCounts = Array(reviewedMap.values) + Array(duePastMap.values) + Array(dueFutureMap.values)
+        let maxCount = max(allCounts.max() ?? 1, 1)
+        let barMax = 30
+
+        print("Activity (14 days)")
+        print("  date   reviewed  due/scheduled")
+        print("  " + String(repeating: "─", count: 50))
+
+        for dateStr in allDates {
+            let isToday = dateStr == todayStr
+            let isPast = dateStr < todayStr
+            let shortDate = String(dateStr.suffix(5))
+
+            let rev = reviewedMap[dateStr]
+            let due = isPast ? duePastMap[dateStr] : dueFutureMap[dateStr]
+
+            // Skip days with no data (except today)
+            if rev == nil && due == nil && !isToday { continue }
+
+            let revCount = rev ?? 0
+            let dueCount = due ?? 0
+
+            let revFilled = maxCount > 0 ? Int(Double(revCount) / Double(maxCount) * Double(barMax)) : 0
+            let revBar = revCount > 0 ? String(repeating: "▓", count: max(revFilled, 1)) : ""
+
+            let marker = isToday ? " ◀ today" : ""
+
+            if revCount > 0 && dueCount > 0 {
+                let revStr = String(revCount).padding(toLength: 5, withPad: " ", startingAt: 0)
+                print("  \(shortDate) \(revBar) \(revStr) (+\(dueCount) due)\(marker)")
+            } else if revCount > 0 {
+                print("  \(shortDate) \(revBar) \(revCount)\(marker)")
+            } else if dueCount > 0 {
+                let dueBar = String(repeating: "░", count: max(Int(Double(dueCount) / Double(maxCount) * Double(barMax)), 1))
+                print("  \(shortDate) \(dueBar) \(dueCount) due\(marker)")
+            } else {
+                print("  \(shortDate) -\(marker)")
             }
-        } else if d.overdueCards > 0 {
-            print("  (no upcoming — \(d.overdueCards) cards already overdue)")
         }
     }
 
@@ -239,6 +260,7 @@ public struct StatsCommand: ParsableCommand {
         }
         dict["tags"] = tagsList
         dict["pastReviews"] = d.pastReviews.map { ["date": $0.date, "count": $0.count] as [String: Any] }
+        dict["pastDue"] = d.pastDue.map { ["date": $0.date, "count": $0.count] as [String: Any] }
         dict["futureDue"] = d.futureDue.map { ["date": $0.date, "count": $0.count] as [String: Any] }
         dict["overdueBreakdown"] = [
             "last7d": d.overdueBreakdown.last7d,

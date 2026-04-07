@@ -460,6 +460,21 @@ public final class AnkiDatabase {
             ))
         }
 
+        // Past due (cards that became due in the last 14 days, still overdue)
+        var pastDue: [DayCount] = []
+        try query("""
+            SELECT date(ZNEXTDATE + \(refOffset), 'unixepoch', 'localtime') as day, COUNT(*)
+            FROM ZCOREDATAFLASHCARD
+            WHERE ZNEXTDATE IS NOT NULL AND ZQUEUE != 3 AND ZISARCHIVED = 0
+              AND ZNEXTDATE >= ? AND ZNEXTDATE < ?
+            GROUP BY day ORDER BY day
+        """, params: [now - 14 * 86400, now]) { stmt in
+            pastDue.append(DayCount(
+                date: columnText(stmt, 0),
+                count: sqlite3_column_int64(stmt, 1)
+            ))
+        }
+
         // Future due (next 14 days by ZNEXTDATE)
         var futureDue: [DayCount] = []
         try query("""
@@ -509,6 +524,7 @@ public final class AnkiDatabase {
             totalRepetitions: totalReps,
             tagStats: tagStats,
             pastReviews: pastReviews,
+            pastDue: pastDue,
             futureDue: futureDue,
             overdueBreakdown: OverdueBreakdown(
                 last7d: od7, last30d: od30, last90d: od90, older: odOlder
