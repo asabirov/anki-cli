@@ -5,7 +5,7 @@ public struct AnkiNotesCLI: ParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "anki-notes-cli",
         abstract: "CLI for Anki Notes flashcards (read-only, via local database)",
-        version: "0.4.0",
+        version: "0.5.0",
         subcommands: [
             ListCards.self,
             GetCard.self,
@@ -14,6 +14,7 @@ public struct AnkiNotesCLI: ParsableCommand {
             StatsCommand.self,
             ExportCards.self,
             ExtractCommand.self,
+            ImportCommand.self,
             BackupCommand.self,
             RestoreCommand.self,
         ]
