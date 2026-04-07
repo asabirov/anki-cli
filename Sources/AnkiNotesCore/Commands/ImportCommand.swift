@@ -172,6 +172,7 @@ public struct ImportCommand: ParsableCommand {
             let maxTag = try maxPK(db, table: "ZCOREDATATAG")
             let maxChange = try maxPK(db, table: "ACHANGE")
             let maxTransaction = try maxPK(db, table: "ATRANSACTION")
+            let maxCKMeta = try maxPK(db, table: "ANSCKRECORDMETADATA")
 
             // Load existing tags
             var existingTags: [String: Int64] = [:]
@@ -194,6 +195,7 @@ public struct ImportCommand: ParsableCommand {
             var nextNote = maxNote
             var nextTag = maxTag
             var nextChange = maxChange
+            var nextCKMeta = maxCKMeta
             var imported = 0
 
             for card in cards {
@@ -285,6 +287,16 @@ public struct ImportCommand: ParsableCommand {
                             INSERT INTO ACHANGE (Z_PK, Z_ENT, Z_OPT, ZCHANGETYPE, ZENTITY, ZENTITYPK, ZTRANSACTIONID)
                             VALUES (\(nextChange), 16001, NULL, 2, 2, \(tagPK), \(txnPK))
                         """)
+
+                        // CK metadata for new tag (entityID=2)
+                        nextCKMeta += 1
+                        let tagCKID = UUID().uuidString
+                        try execBind(db, """
+                            INSERT INTO ANSCKRECORDMETADATA
+                            (Z_PK, Z_ENT, Z_OPT, ZENTITYID, ZENTITYPK, ZNEEDSCLOUDDELETE, ZNEEDSLOCALDELETE,
+                             ZNEEDSUPLOAD, ZRECORDZONE, ZCKRECORDNAME)
+                            VALUES (?, 17012, 1, 2, ?, 0, 0, 1, 1, ?)
+                        """, params: [.int(nextCKMeta), .int(tagPK), .text(tagCKID)])
                     }
 
                     // Insert tag-flashcard relationship
@@ -307,6 +319,27 @@ public struct ImportCommand: ParsableCommand {
                     INSERT INTO ACHANGE (Z_PK, Z_ENT, Z_OPT, ZCHANGETYPE, ZENTITY, ZENTITYPK, ZTRANSACTIONID)
                     VALUES (\(nextChange), 16001, NULL, 2, 5, \(nextNote), \(txnPK))
                 """)
+
+                // CloudKit sync metadata — mark new records for upload
+                // Flashcard (entityID=1)
+                nextCKMeta += 1
+                let flashcardCKID = UUID().uuidString
+                try execBind(db, """
+                    INSERT INTO ANSCKRECORDMETADATA
+                    (Z_PK, Z_ENT, Z_OPT, ZENTITYID, ZENTITYPK, ZNEEDSCLOUDDELETE, ZNEEDSLOCALDELETE,
+                     ZNEEDSUPLOAD, ZRECORDZONE, ZCKRECORDNAME)
+                    VALUES (?, 17012, 1, 1, ?, 0, 0, 1, 1, ?)
+                """, params: [.int(nextCKMeta), .int(nextFlashcard), .text(flashcardCKID)])
+
+                // Note (entityID=5)
+                nextCKMeta += 1
+                let noteCKID = UUID().uuidString
+                try execBind(db, """
+                    INSERT INTO ANSCKRECORDMETADATA
+                    (Z_PK, Z_ENT, Z_OPT, ZENTITYID, ZENTITYPK, ZNEEDSCLOUDDELETE, ZNEEDSLOCALDELETE,
+                     ZNEEDSUPLOAD, ZRECORDZONE, ZCKRECORDNAME)
+                    VALUES (?, 17012, 1, 5, ?, 0, 0, 1, 1, ?)
+                """, params: [.int(nextCKMeta), .int(nextNote), .text(noteCKID)])
 
                 imported += 1
             }
