@@ -168,11 +168,10 @@ public struct ImportCommand: ParsableCommand {
         do {
             // Get current max PKs
             let maxFlashcard = try maxPK(db, table: "ZCOREDATAFLASHCARD")
-            let maxNote = try maxPK(db, table: "ZNOTE")
             let maxTag = try maxPK(db, table: "ZCOREDATATAG")
+            let maxMedia = try maxPK(db, table: "ZMEDIA")
             let maxChange = try maxPK(db, table: "ACHANGE")
             let maxTransaction = try maxPK(db, table: "ATRANSACTION")
-            let maxCKMeta = try maxPK(db, table: "ANSCKRECORDMETADATA")
 
             // Load existing tags
             var existingTags: [String: Int64] = [:]
@@ -192,78 +191,65 @@ public struct ImportCommand: ParsableCommand {
             """)
 
             var nextFlashcard = maxFlashcard
-            var nextNote = maxNote
             var nextTag = maxTag
+            var nextMedia = try maxPK(db, table: "ZMEDIA")
             var nextChange = maxChange
-            var nextCKMeta = maxCKMeta
             var imported = 0
 
             for card in cards {
-                nextNote += 1
                 nextFlashcard += 1
 
-                // Build note fields (front^_back format)
-                let noteFields = "\(card.front)\u{1F}\(card.back)"
-
-                // Insert note
-                try execBind(db, """
-                    INSERT INTO ZNOTE (Z_PK, Z_ENT, Z_OPT, ZMODEL, ZFLDS)
-                    VALUES (?, 5, 1, 1, ?)
-                """, params: [.int(nextNote), .text(noteFields)])
-
-                // Generate UUID for flashcard
                 let uuid = UUID()
                 let uuidData = withUnsafeBytes(of: uuid.uuid) { Data($0) }
                 let recordDate = now
 
-                // Load image data if provided
-                var imageData: Data?
+                // Build back text — if image provided, add as ZMEDIA + HTML img tag
+                var backText = card.back
                 if let imgPath = card.imagePath {
                     let resolvedPath = (imgPath as NSString).expandingTildeInPath
                     guard FileManager.default.fileExists(atPath: resolvedPath) else {
                         throw AnkiCLIError.databaseError("Image not found: \(imgPath)")
                     }
-                    var raw = try Data(contentsOf: URL(fileURLWithPath: resolvedPath))
-                    // Add 0x01 prefix byte (Anki Notes ZIMAGEDATA format)
-                    var prefixed = Data([0x01])
-                    prefixed.append(raw)
-                    imageData = prefixed
+                    let imgData = try Data(contentsOf: URL(fileURLWithPath: resolvedPath))
+                    let ext = (resolvedPath as NSString).pathExtension.lowercased()
+                    let mediaFname = "\(UUID().uuidString).\(ext.isEmpty ? "jpg" : ext)"
+
+                    // Insert ZMEDIA record (38-byte reference, matching app format)
+                    nextMedia += 1
+                    let refString = Data(mediaFname.utf8)
+                    try execBind(db, """
+                        INSERT INTO ZMEDIA (Z_PK, Z_ENT, Z_OPT, ZCARD, ZFNAME, ZDATA)
+                        VALUES (?, 3, 1, ?, ?, ?)
+                    """, params: [.int(nextMedia), .int(nextFlashcard), .text(mediaFname), .blob(imgData)])
+
+                    // Append img tag to back (matching app's HTML format)
+                    let imgTag = "<img src=\"media?fname=\(mediaFname)\">"
+                    if backText.isEmpty {
+                        backText = "<p>\(imgTag)</p>"
+                    } else {
+                        backText += "<p>\(imgTag)</p>"
+                    }
                 }
 
-                // Insert flashcard
-                if let imgData = imageData {
-                    try execBind(db, """
-                        INSERT INTO ZCOREDATAFLASHCARD
-                        (Z_PK, Z_ENT, Z_OPT, ZDUE, ZISARCHIVED, ZISFAVORITE, ZIVL, ZLAPSES, ZLEFT,
-                         ZODUE, ZORD, ZQUEUE, ZREPETITION, ZTYPE, ZNOTE,
-                         ZEASINESSFACTOR, ZINTERVALDOUBLE, ZMOD, ZRECORDDATE,
-                         ZFRONT, ZBACK, ZUUID, ZIMAGEDATA)
-                        VALUES (?, 1, 1, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, ?,
-                         2.5, 0.0, ?, ?,
-                         ?, ?, ?, ?)
-                    """, params: [
-                        .int(nextFlashcard), .int(nextNote),
-                        .double(recordDate), .double(recordDate),
-                        .text(card.front), .text(card.back), .blob(uuidData), .blob(imgData)
-                    ])
-                } else {
-                    try execBind(db, """
-                        INSERT INTO ZCOREDATAFLASHCARD
-                        (Z_PK, Z_ENT, Z_OPT, ZDUE, ZISARCHIVED, ZISFAVORITE, ZIVL, ZLAPSES, ZLEFT,
-                         ZODUE, ZORD, ZQUEUE, ZREPETITION, ZTYPE, ZNOTE,
-                         ZEASINESSFACTOR, ZINTERVALDOUBLE, ZMOD, ZRECORDDATE,
-                         ZFRONT, ZBACK, ZUUID)
-                        VALUES (?, 1, 1, 0, 0, 0, 0, 0, 0,
-                         0, 0, 0, 0, 0, ?,
-                         2.5, 0.0, ?, ?,
-                         ?, ?, ?)
-                    """, params: [
-                        .int(nextFlashcard), .int(nextNote),
-                        .double(recordDate), .double(recordDate),
-                        .text(card.front), .text(card.back), .blob(uuidData)
-                    ])
-                }
+                // Insert flashcard (matching app's exact format)
+                // - No ZNOTE (app doesn't create Note records for new cards)
+                // - Z_OPT=2, ZLEFT=6006, ZEASINESSFACTOR=2.0
+                // - ZDATEEDITED, ZNEXTDATE set to now
+                try execBind(db, """
+                    INSERT INTO ZCOREDATAFLASHCARD
+                    (Z_PK, Z_ENT, Z_OPT, ZDUE, ZISARCHIVED, ZISFAVORITE, ZIVL, ZLAPSES, ZLEFT,
+                     ZODUE, ZORD, ZQUEUE, ZREPETITION, ZTYPE,
+                     ZDATEEDITED, ZEASINESSFACTOR, ZINTERVALDOUBLE, ZMOD, ZNEXTDATE, ZRECORDDATE,
+                     ZFRONT, ZBACK, ZUUID)
+                    VALUES (?, 1, 2, 0, 0, 0, 0, 0, 6006,
+                     0, 0, 0, 0, 0,
+                     ?, 2.0, 0.0, ?, ?, ?,
+                     ?, ?, ?)
+                """, params: [
+                    .int(nextFlashcard),
+                    .double(recordDate), .double(recordDate), .double(recordDate), .double(recordDate),
+                    .text(card.front), .text(backText), .blob(uuidData)
+                ])
 
                 // Handle tags
                 for tagName in card.tags {
@@ -281,74 +267,45 @@ public struct ImportCommand: ParsableCommand {
                         """, params: [.int(tagPK), .text(tagName), .blob(tagUUIDData)])
                         existingTags[tagName] = tagPK
 
-                        // Track tag creation
                         nextChange += 1
                         try exec(db, """
                             INSERT INTO ACHANGE (Z_PK, Z_ENT, Z_OPT, ZCHANGETYPE, ZENTITY, ZENTITYPK, ZTRANSACTIONID)
-                            VALUES (\(nextChange), 16001, NULL, 2, 2, \(tagPK), \(txnPK))
+                            VALUES (\(nextChange), 16001, NULL, 0, 2, \(tagPK), \(txnPK))
                         """)
-
-                        // CK metadata for new tag (entityID=2)
-                        nextCKMeta += 1
-                        let tagCKID = UUID().uuidString
-                        try execBind(db, """
-                            INSERT INTO ANSCKRECORDMETADATA
-                            (Z_PK, Z_ENT, Z_OPT, ZENTITYID, ZENTITYPK, ZNEEDSCLOUDDELETE, ZNEEDSLOCALDELETE,
-                             ZNEEDSUPLOAD, ZRECORDZONE, ZCKRECORDNAME)
-                            VALUES (?, 17012, 1, 2, ?, 0, 0, 1, 1, ?)
-                        """, params: [.int(nextCKMeta), .int(tagPK), .text(tagCKID)])
                     }
 
-                    // Insert tag-flashcard relationship
                     try exec(db, """
                         INSERT OR IGNORE INTO Z_1TAGS (Z_1FLASHCARDS, Z_2TAGS)
                         VALUES (\(nextFlashcard), \(tagPK))
                     """)
                 }
 
-                // Track flashcard creation in change history
+                // Track flashcard creation (ZCHANGETYPE=0 = insert, matching app)
                 nextChange += 1
                 try exec(db, """
                     INSERT INTO ACHANGE (Z_PK, Z_ENT, Z_OPT, ZCHANGETYPE, ZENTITY, ZENTITYPK, ZTRANSACTIONID)
-                    VALUES (\(nextChange), 16001, NULL, 2, 1, \(nextFlashcard), \(txnPK))
+                    VALUES (\(nextChange), 16001, NULL, 0, 1, \(nextFlashcard), \(txnPK))
                 """)
 
-                // Track note creation
-                nextChange += 1
-                try exec(db, """
-                    INSERT INTO ACHANGE (Z_PK, Z_ENT, Z_OPT, ZCHANGETYPE, ZENTITY, ZENTITYPK, ZTRANSACTIONID)
-                    VALUES (\(nextChange), 16001, NULL, 2, 5, \(nextNote), \(txnPK))
-                """)
-
-                // CloudKit sync metadata — mark new records for upload
-                // Flashcard (entityID=1)
-                nextCKMeta += 1
-                let flashcardCKID = UUID().uuidString
-                try execBind(db, """
-                    INSERT INTO ANSCKRECORDMETADATA
-                    (Z_PK, Z_ENT, Z_OPT, ZENTITYID, ZENTITYPK, ZNEEDSCLOUDDELETE, ZNEEDSLOCALDELETE,
-                     ZNEEDSUPLOAD, ZRECORDZONE, ZCKRECORDNAME)
-                    VALUES (?, 17012, 1, 1, ?, 0, 0, 1, 1, ?)
-                """, params: [.int(nextCKMeta), .int(nextFlashcard), .text(flashcardCKID)])
-
-                // Note (entityID=5)
-                nextCKMeta += 1
-                let noteCKID = UUID().uuidString
-                try execBind(db, """
-                    INSERT INTO ANSCKRECORDMETADATA
-                    (Z_PK, Z_ENT, Z_OPT, ZENTITYID, ZENTITYPK, ZNEEDSCLOUDDELETE, ZNEEDSLOCALDELETE,
-                     ZNEEDSUPLOAD, ZRECORDZONE, ZCKRECORDNAME)
-                    VALUES (?, 17012, 1, 5, ?, 0, 0, 1, 1, ?)
-                """, params: [.int(nextCKMeta), .int(nextNote), .text(noteCKID)])
+                // Track media creation if image was added
+                if card.imagePath != nil {
+                    nextChange += 1
+                    try exec(db, """
+                        INSERT INTO ACHANGE (Z_PK, Z_ENT, Z_OPT, ZCHANGETYPE, ZENTITY, ZENTITYPK, ZTRANSACTIONID)
+                        VALUES (\(nextChange), 16001, NULL, 0, 3, \(nextMedia), \(txnPK))
+                    """)
+                }
 
                 imported += 1
             }
 
             // Update Z_PRIMARYKEY counters
             try exec(db, "UPDATE Z_PRIMARYKEY SET Z_MAX = \(nextFlashcard) WHERE Z_NAME = 'CoreDataFlashcard'")
-            try exec(db, "UPDATE Z_PRIMARYKEY SET Z_MAX = \(nextNote) WHERE Z_NAME = 'Note'")
             if nextTag > maxTag {
                 try exec(db, "UPDATE Z_PRIMARYKEY SET Z_MAX = \(nextTag) WHERE Z_NAME = 'CoreDataTag'")
+            }
+            if nextMedia > maxMedia {
+                try exec(db, "UPDATE Z_PRIMARYKEY SET Z_MAX = \(nextMedia) WHERE Z_NAME = 'Media'")
             }
 
             try exec(db, "COMMIT")
