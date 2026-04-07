@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-commit hook: block commits containing secrets or tokens.
+# Scans staged files for common secret patterns.
+
+PATTERNS=(
+  # API keys and tokens
+  'ckWebAuthToken'
+  'ckAPIToken'
+  'PRIVATE.KEY'
+  'BEGIN RSA PRIVATE KEY'
+  'BEGIN OPENSSH PRIVATE KEY'
+  'BEGIN EC PRIVATE KEY'
+  # Common secret patterns (base64-ish long strings assigned to variables)
+  'api[_-]?key\s*[:=]\s*["\x27][A-Za-z0-9+/=]{20,}'
+  'api[_-]?token\s*[:=]\s*["\x27][A-Za-z0-9+/=]{20,}'
+  'api[_-]?secret\s*[:=]\s*["\x27][A-Za-z0-9+/=]{20,}'
+  'auth[_-]?token\s*[:=]\s*["\x27][A-Za-z0-9+/=]{20,}'
+  'access[_-]?token\s*[:=]\s*["\x27][A-Za-z0-9+/=]{20,}'
+  'secret[_-]?key\s*[:=]\s*["\x27][A-Za-z0-9+/=]{20,}'
+  'password\s*[:=]\s*["\x27][^\s"'\'']{8,}'
+  # AWS
+  'AKIA[0-9A-Z]{16}'
+  # GitHub tokens
+  'gh[pousr]_[A-Za-z0-9_]{36,}'
+  # Generic hex tokens (40+ chars, likely a secret)
+  '["\x27][0-9a-f]{40,}["\x27]'
+  # .env style secrets
+  '^[A-Z_]*SECRET[A-Z_]*=.+'
+  '^[A-Z_]*TOKEN[A-Z_]*=.+'
+  '^[A-Z_]*PASSWORD[A-Z_]*=.+'
+  # macOS keychain / container paths with user info
+  'Library/Containers/maccatalyst'
+)
+
+# Files to always skip
+SKIP_PATTERNS='\.png$|\.jpg$|\.jpeg$|\.gif$|\.ico$|\.woff|\.ttf$|\.sqlite$|\.tar\.gz$|\.sha256$|pre-commit$'
+
+errors=0
+
+for file in $(git diff --cached --name-only --diff-filter=ACM); do
+  # Skip binary/media files and this hook itself
+  if echo "$file" | grep -qE "$SKIP_PATTERNS"; then
+    continue
+  fi
+
+  for pattern in "${PATTERNS[@]}"; do
+    if git diff --cached -- "$file" | grep -qEi "$pattern"; then
+      echo "ERROR: Potential secret found in $file"
+      echo "  Pattern: $pattern"
+      echo "  Matching lines:"
+      git diff --cached -- "$file" | grep -nEi "$pattern" | head -3 | sed 's/^/    /'
+      echo
+      errors=$((errors + 1))
+    fi
+  done
+done
+
+if [ $errors -gt 0 ]; then
+  echo "========================================="
+  echo "COMMIT BLOCKED: $errors potential secret(s) detected."
+  echo "If this is a false positive, use: git commit --no-verify"
+  echo "========================================="
+  exit 1
+fi
