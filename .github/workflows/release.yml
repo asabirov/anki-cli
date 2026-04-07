@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release binary
+        run: swift build -c release --arch arm64 --arch x86_64
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp .build/apple/Products/Release/anki-notes-cli dist/anki-notes-cli
+          cd dist && tar czf anki-notes-cli-macos-universal.tar.gz anki-notes-cli
+          shasum -a 256 anki-notes-cli-macos-universal.tar.gz > anki-notes-cli-macos-universal.tar.gz.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/anki-notes-cli-macos-universal.tar.gz
+            dist/anki-notes-cli-macos-universal.tar.gz.sha256
+          generate_release_notes: true
