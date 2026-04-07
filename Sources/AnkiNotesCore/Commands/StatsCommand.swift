@@ -76,6 +76,21 @@ public struct StatsCommand: ParsableCommand {
         }
         print()
 
+        // Review Timeline
+        printTimeline(d)
+        print()
+
+        // Overdue Breakdown
+        if d.overdueCards > 0 {
+            let ob = d.overdueBreakdown
+            print("Overdue Breakdown")
+            print("  Last 7 days:  \(ob.last7d)")
+            print("  Last 30 days: \(ob.last30d)")
+            print("  Last 90 days: \(ob.last90d)")
+            print("  Older:        \(ob.older)")
+            print()
+        }
+
         // By Tag
         if !d.tagStats.isEmpty {
             print("By Tag")
@@ -107,6 +122,54 @@ public struct StatsCommand: ParsableCommand {
                       ivl.padding(toLength: ivlW, withPad: " ", startingAt: 0) +
                       matPct.padding(toLength: matW, withPad: " ", startingAt: 0))
             }
+        }
+    }
+
+    // MARK: - Timeline
+
+    private func printTimeline(_ d: DashboardStats) {
+        let past = d.pastReviews
+        let future = d.futureDue
+
+        guard !past.isEmpty || !future.isEmpty else { return }
+
+        // Find max for scaling
+        let allCounts = past.map(\.count) + future.map(\.count)
+        let maxCount = allCounts.max() ?? 1
+        let barMax = 30
+
+        print("Review Timeline (14 days)")
+
+        // Past (reviewed cards)
+        if !past.isEmpty {
+            print("  Past (reviewed)")
+            for day in past {
+                let shortDate = String(day.date.suffix(5))  // MM-DD
+                let filled = Int(Double(day.count) / Double(maxCount) * Double(barMax))
+                let bar = String(repeating: "▓", count: filled)
+                print("  \(shortDate) \(bar) \(day.count)")
+            }
+        }
+
+        // Separator / today marker
+        let today = {
+            let f = DateFormatter()
+            f.dateFormat = "MM-dd"
+            return f.string(from: Date())
+        }()
+        print("  \(today) ── today ──")
+
+        // Future (due cards)
+        if !future.isEmpty {
+            print("  Upcoming (due)")
+            for day in future {
+                let shortDate = String(day.date.suffix(5))
+                let filled = Int(Double(day.count) / Double(maxCount) * Double(barMax))
+                let bar = String(repeating: "░", count: filled)
+                print("  \(shortDate) \(bar) \(day.count)")
+            }
+        } else if d.overdueCards > 0 {
+            print("  (no upcoming — \(d.overdueCards) cards already overdue)")
         }
     }
 
@@ -175,6 +238,14 @@ public struct StatsCommand: ParsableCommand {
             ]
         }
         dict["tags"] = tagsList
+        dict["pastReviews"] = d.pastReviews.map { ["date": $0.date, "count": $0.count] as [String: Any] }
+        dict["futureDue"] = d.futureDue.map { ["date": $0.date, "count": $0.count] as [String: Any] }
+        dict["overdueBreakdown"] = [
+            "last7d": d.overdueBreakdown.last7d,
+            "last30d": d.overdueBreakdown.last30d,
+            "last90d": d.overdueBreakdown.last90d,
+            "older": d.overdueBreakdown.older,
+        ] as [String: Any]
 
         if let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]),
            let str = String(data: data, encoding: .utf8) {

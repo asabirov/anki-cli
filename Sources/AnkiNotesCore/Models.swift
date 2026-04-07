@@ -138,6 +138,21 @@ public struct DashboardStats {
     public let totalLapses: Int64
     public let totalRepetitions: Int64
     public let tagStats: [TagStats]
+    public let pastReviews: [DayCount]   // cards reviewed per day (by ZMOD)
+    public let futureDue: [DayCount]     // cards due per day (by ZNEXTDATE)
+    public let overdueBreakdown: OverdueBreakdown
+}
+
+public struct DayCount {
+    public let date: String   // yyyy-MM-dd
+    public let count: Int64
+}
+
+public struct OverdueBreakdown {
+    public let last7d: Int64
+    public let last30d: Int64
+    public let last90d: Int64
+    public let older: Int64
 }
 
 public struct TagStats {

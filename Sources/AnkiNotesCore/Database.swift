@@ -444,6 +444,61 @@ public final class AnkiDatabase {
             ))
         }
 
+        // Past reviews (last 14 days by ZMOD)
+        let refOffset: Double = 978307200  // Core Data ref date to Unix epoch
+        var pastReviews: [DayCount] = []
+        try query("""
+            SELECT date(ZMOD + \(refOffset), 'unixepoch', 'localtime') as day, COUNT(*)
+            FROM ZCOREDATAFLASHCARD
+            WHERE ZMOD IS NOT NULL AND ZMOD > 0
+              AND ZMOD >= ?
+            GROUP BY day ORDER BY day
+        """, params: [now - 14 * 86400]) { stmt in
+            pastReviews.append(DayCount(
+                date: columnText(stmt, 0),
+                count: sqlite3_column_int64(stmt, 1)
+            ))
+        }
+
+        // Future due (next 14 days by ZNEXTDATE)
+        var futureDue: [DayCount] = []
+        try query("""
+            SELECT date(ZNEXTDATE + \(refOffset), 'unixepoch', 'localtime') as day, COUNT(*)
+            FROM ZCOREDATAFLASHCARD
+            WHERE ZNEXTDATE IS NOT NULL AND ZQUEUE != 3 AND ZISARCHIVED = 0
+              AND ZNEXTDATE >= ? AND ZNEXTDATE < ?
+            GROUP BY day ORDER BY day
+        """, params: [now, now + 14 * 86400]) { stmt in
+            futureDue.append(DayCount(
+                date: columnText(stmt, 0),
+                count: sqlite3_column_int64(stmt, 1)
+            ))
+        }
+
+        // Overdue breakdown
+        var od7: Int64 = 0, od30: Int64 = 0, od90: Int64 = 0, odOlder: Int64 = 0
+        try query("""
+            SELECT
+              SUM(CASE WHEN ZNEXTDATE >= ? THEN 1 ELSE 0 END),
+              SUM(CASE WHEN ZNEXTDATE >= ? AND ZNEXTDATE < ? THEN 1 ELSE 0 END),
+              SUM(CASE WHEN ZNEXTDATE >= ? AND ZNEXTDATE < ? THEN 1 ELSE 0 END),
+              SUM(CASE WHEN ZNEXTDATE < ? THEN 1 ELSE 0 END)
+            FROM ZCOREDATAFLASHCARD
+            WHERE ZNEXTDATE IS NOT NULL AND ZNEXTDATE < ?
+              AND ZQUEUE != 3 AND ZISARCHIVED = 0
+        """, params: [
+            now - 7 * 86400,
+            now - 30 * 86400, now - 7 * 86400,
+            now - 90 * 86400, now - 30 * 86400,
+            now - 90 * 86400,
+            now
+        ]) { stmt in
+            od7 = sqlite3_column_int64(stmt, 0)
+            od30 = sqlite3_column_int64(stmt, 1)
+            od90 = sqlite3_column_int64(stmt, 2)
+            odOlder = sqlite3_column_int64(stmt, 3)
+        }
+
         return DashboardStats(
             deck: deck,
             matureCards: mature,
@@ -452,7 +507,12 @@ public final class AnkiDatabase {
             overdueCards: overdue,
             totalLapses: totalLapses,
             totalRepetitions: totalReps,
-            tagStats: tagStats
+            tagStats: tagStats,
+            pastReviews: pastReviews,
+            futureDue: futureDue,
+            overdueBreakdown: OverdueBreakdown(
+                last7d: od7, last30d: od30, last90d: od90, older: odOlder
+            )
         )
     }
 
