@@ -6,17 +6,23 @@ Works by reading the app's local SQLite database directly (read-only). No API ke
 
 ## Install
 
+### From GitHub Releases (recommended)
+
 ```bash
-# Clone and build
+curl -fsSL https://github.com/asabirov/anki-cli/releases/latest/download/anki-notes-cli-macos-universal.tar.gz | tar xz
+install -m 755 anki-notes-cli ~/.local/bin/
+```
+
+### From source
+
+```bash
 git clone https://github.com/asabirov/anki-cli.git
 cd anki-cli
 swift build -c release
-
-# Copy to PATH
-cp .build/release/anki-notes-cli /usr/local/bin/
+cp .build/release/anki-notes-cli ~/.local/bin/
 ```
 
-Requires: macOS 13+, Swift 5.9+, [Anki Notes](https://apps.apple.com/app/anki-notes-flashcards-maker/id1503902660) installed.
+Requires: macOS 13+, [Anki Notes](https://apps.apple.com/app/anki-notes-flashcards-maker/id1503902660) installed. Building from source requires Swift 5.9+.
 
 ## Usage
 
