@@ -128,3 +128,30 @@ public struct DeckStats {
     public let averageInterval: Double
     public let dueToday: Int64
 }
+
+public struct DashboardStats {
+    public let deck: DeckStats
+    public let matureCards: Int64    // interval > 21 days
+    public let youngCards: Int64     // interval 1-21 days
+    public let unseenCards: Int64    // interval = 0
+    public let overdueCards: Int64
+    public let totalLapses: Int64
+    public let totalRepetitions: Int64
+    public let tagStats: [TagStats]
+}
+
+public struct TagStats {
+    public let name: String
+    public let totalCards: Int64
+    public let totalLapses: Int64
+    public let totalRepetitions: Int64
+    public let averageInterval: Double
+    public let averageEase: Double
+    public let matureCards: Int64
+    public let youngCards: Int64
+
+    public var retentionPercent: Double {
+        guard totalRepetitions > 0 else { return 0 }
+        return Double(totalRepetitions - totalLapses) / Double(totalRepetitions) * 100
+    }
+}

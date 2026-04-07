@@ -376,6 +376,86 @@ public final class AnkiDatabase {
         )
     }
 
+    // MARK: - Dashboard
+
+    public func getDashboardStats() throws -> DashboardStats {
+        let deck = try getStats()
+        let now = Date().timeIntervalSinceReferenceDate
+
+        var mature: Int64 = 0, young: Int64 = 0, unseen: Int64 = 0
+        var overdue: Int64 = 0, totalLapses: Int64 = 0, totalReps: Int64 = 0
+
+        try query("""
+            SELECT
+                SUM(CASE WHEN ZIVL > 21 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ZIVL > 0 AND ZIVL <= 21 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN ZIVL = 0 THEN 1 ELSE 0 END)
+            FROM ZCOREDATAFLASHCARD WHERE ZISARCHIVED = 0
+        """, params: []) { stmt in
+            mature = sqlite3_column_int64(stmt, 0)
+            young = sqlite3_column_int64(stmt, 1)
+            unseen = sqlite3_column_int64(stmt, 2)
+        }
+
+        try query("""
+            SELECT COUNT(*) FROM ZCOREDATAFLASHCARD
+            WHERE ZNEXTDATE IS NOT NULL AND ZNEXTDATE < ?
+            AND ZQUEUE != 3 AND ZISARCHIVED = 0
+        """, params: [now - 86400]) { stmt in  // overdue = due before yesterday
+            overdue = sqlite3_column_int64(stmt, 0)
+        }
+
+        try query("""
+            SELECT COALESCE(SUM(ZLAPSES), 0), COALESCE(SUM(ZREPETITION), 0)
+            FROM ZCOREDATAFLASHCARD WHERE ZISARCHIVED = 0
+        """, params: []) { stmt in
+            totalLapses = sqlite3_column_int64(stmt, 0)
+            totalReps = sqlite3_column_int64(stmt, 1)
+        }
+
+        // Per-tag stats
+        let sql = """
+            SELECT t.ZNAME,
+                COUNT(*) as total,
+                COALESCE(SUM(f.ZLAPSES), 0),
+                COALESCE(SUM(f.ZREPETITION), 0),
+                AVG(f.ZIVL),
+                AVG(f.ZEASINESSFACTOR),
+                SUM(CASE WHEN f.ZIVL > 21 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN f.ZIVL > 0 AND f.ZIVL <= 21 THEN 1 ELSE 0 END)
+            FROM ZCOREDATAFLASHCARD f
+            JOIN Z_1TAGS jt ON jt.Z_1FLASHCARDS = f.Z_PK
+            JOIN ZCOREDATATAG t ON t.Z_PK = jt.Z_2TAGS
+            WHERE f.ZISARCHIVED = 0
+            GROUP BY t.ZNAME
+            ORDER BY total DESC
+        """
+        var tagStats: [TagStats] = []
+        try query(sql, params: []) { stmt in
+            tagStats.append(TagStats(
+                name: columnText(stmt, 0),
+                totalCards: sqlite3_column_int64(stmt, 1),
+                totalLapses: sqlite3_column_int64(stmt, 2),
+                totalRepetitions: sqlite3_column_int64(stmt, 3),
+                averageInterval: sqlite3_column_double(stmt, 4),
+                averageEase: sqlite3_column_double(stmt, 5),
+                matureCards: sqlite3_column_int64(stmt, 6),
+                youngCards: sqlite3_column_int64(stmt, 7)
+            ))
+        }
+
+        return DashboardStats(
+            deck: deck,
+            matureCards: mature,
+            youngCards: young,
+            unseenCards: unseen,
+            overdueCards: overdue,
+            totalLapses: totalLapses,
+            totalRepetitions: totalReps,
+            tagStats: tagStats
+        )
+    }
+
     // MARK: - SQLite Helpers
 
     private func query(_ sql: String, params: [Any], handler: (OpaquePointer) throws -> Void) throws {
