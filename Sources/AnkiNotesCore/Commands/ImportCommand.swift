@@ -97,7 +97,7 @@ public struct ImportCommand: ParsableCommand {
     /// ```json
     /// [
     ///   { "front": "Hello", "back": "Hola", "tags": ["Spanish"] },
-    ///   { "front": "Cat", "back": "Gato" }
+    ///   { "front": "Cat", "back": "Gato", "image": "/path/to/photo.jpg" }
     /// ]
     /// ```
     private func parseJSON(path: String) throws -> [ImportCard] {
@@ -110,7 +110,8 @@ public struct ImportCommand: ParsableCommand {
             ImportCard(
                 front: obj["front"] as? String ?? "",
                 back: obj["back"] as? String ?? "",
-                tags: obj["tags"] as? [String] ?? []
+                tags: obj["tags"] as? [String] ?? [],
+                imagePath: obj["image"] as? String
             )
         }
     }
@@ -145,7 +146,7 @@ public struct ImportCommand: ParsableCommand {
             } else {
                 tags = []
             }
-            return ImportCard(front: front, back: back, tags: tags)
+            return ImportCard(front: front, back: back, tags: tags, imagePath: nil)
         }
     }
 
@@ -213,22 +214,54 @@ public struct ImportCommand: ParsableCommand {
                 let uuidData = withUnsafeBytes(of: uuid.uuid) { Data($0) }
                 let recordDate = now
 
+                // Load image data if provided
+                var imageData: Data?
+                if let imgPath = card.imagePath {
+                    let resolvedPath = (imgPath as NSString).expandingTildeInPath
+                    guard FileManager.default.fileExists(atPath: resolvedPath) else {
+                        throw AnkiCLIError.databaseError("Image not found: \(imgPath)")
+                    }
+                    var raw = try Data(contentsOf: URL(fileURLWithPath: resolvedPath))
+                    // Add 0x01 prefix byte (Anki Notes ZIMAGEDATA format)
+                    var prefixed = Data([0x01])
+                    prefixed.append(raw)
+                    imageData = prefixed
+                }
+
                 // Insert flashcard
-                try execBind(db, """
-                    INSERT INTO ZCOREDATAFLASHCARD
-                    (Z_PK, Z_ENT, Z_OPT, ZDUE, ZISARCHIVED, ZISFAVORITE, ZIVL, ZLAPSES, ZLEFT,
-                     ZODUE, ZORD, ZQUEUE, ZREPETITION, ZTYPE, ZNOTE,
-                     ZEASINESSFACTOR, ZINTERVALDOUBLE, ZMOD, ZRECORDDATE,
-                     ZFRONT, ZBACK, ZUUID)
-                    VALUES (?, 1, 1, 0, 0, 0, 0, 0, 0,
-                     0, 0, 0, 0, 0, ?,
-                     2.5, 0.0, ?, ?,
-                     ?, ?, ?)
-                """, params: [
-                    .int(nextFlashcard), .int(nextNote),
-                    .double(recordDate), .double(recordDate),
-                    .text(card.front), .text(card.back), .blob(uuidData)
-                ])
+                if let imgData = imageData {
+                    try execBind(db, """
+                        INSERT INTO ZCOREDATAFLASHCARD
+                        (Z_PK, Z_ENT, Z_OPT, ZDUE, ZISARCHIVED, ZISFAVORITE, ZIVL, ZLAPSES, ZLEFT,
+                         ZODUE, ZORD, ZQUEUE, ZREPETITION, ZTYPE, ZNOTE,
+                         ZEASINESSFACTOR, ZINTERVALDOUBLE, ZMOD, ZRECORDDATE,
+                         ZFRONT, ZBACK, ZUUID, ZIMAGEDATA)
+                        VALUES (?, 1, 1, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, ?,
+                         2.5, 0.0, ?, ?,
+                         ?, ?, ?, ?)
+                    """, params: [
+                        .int(nextFlashcard), .int(nextNote),
+                        .double(recordDate), .double(recordDate),
+                        .text(card.front), .text(card.back), .blob(uuidData), .blob(imgData)
+                    ])
+                } else {
+                    try execBind(db, """
+                        INSERT INTO ZCOREDATAFLASHCARD
+                        (Z_PK, Z_ENT, Z_OPT, ZDUE, ZISARCHIVED, ZISFAVORITE, ZIVL, ZLAPSES, ZLEFT,
+                         ZODUE, ZORD, ZQUEUE, ZREPETITION, ZTYPE, ZNOTE,
+                         ZEASINESSFACTOR, ZINTERVALDOUBLE, ZMOD, ZRECORDDATE,
+                         ZFRONT, ZBACK, ZUUID)
+                        VALUES (?, 1, 1, 0, 0, 0, 0, 0, 0,
+                         0, 0, 0, 0, 0, ?,
+                         2.5, 0.0, ?, ?,
+                         ?, ?, ?)
+                    """, params: [
+                        .int(nextFlashcard), .int(nextNote),
+                        .double(recordDate), .double(recordDate),
+                        .text(card.front), .text(card.back), .blob(uuidData)
+                    ])
+                }
 
                 // Handle tags
                 for tagName in card.tags {
@@ -393,4 +426,5 @@ struct ImportCard {
     let front: String
     let back: String
     let tags: [String]
+    let imagePath: String?  // optional path to an image file
 }
