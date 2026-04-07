@@ -2,7 +2,7 @@
 
 CLI for [Anki Notes: Flashcards Maker](https://apps.apple.com/app/anki-notes-flashcards-maker/id1503902660) — manage your flashcards from the terminal: search, review stats, import, export, backup & restore.
 
-Works by reading (and optionally writing to) the app's local SQLite database. No API keys or authentication required.
+Read-only access to the app's local SQLite database. No API keys or authentication required.
 
 ## Install
 
@@ -53,10 +53,6 @@ anki-notes-cli export --format csv --tag Spanish -o spanish.csv
 # Extract to markdown files + media
 anki-notes-cli extract ./output --tag Japanese
 
-# Import cards (quit Anki Notes first)
-anki-notes-cli import cards.json
-anki-notes-cli import cards.json --dry-run
-
 # Backup & restore
 anki-notes-cli backup
 anki-notes-cli restore ~/backup.sqlite
@@ -75,26 +71,8 @@ All commands support `--json` for machine-readable output and `--db <path>` to o
 | `tags`      | List all tags with card counts                       |
 | `export`    | Export cards as JSON, CSV, or TSV                    |
 | `extract`   | Extract all cards to markdown files with media       |
-| `import`    | Import cards from JSON or TSV (with optional images) |
 | `backup`    | Back up the database (SQLite snapshot)               |
 | `restore`   | Restore the database from a backup                   |
-
-## Import format
-
-**JSON** (with optional image):
-```json
-[
-  { "front": "Hello", "back": "Hola", "tags": ["Spanish"] },
-  { "front": "Cat", "back": "Gato", "image": "/path/to/photo.jpg" }
-]
-```
-
-**TSV** (tab-separated, header row required):
-```
-front	back	tags
-Hello	Hola	Spanish
-Cat	Gato	Animals;Spanish
-```
 
 ## How it works
 
@@ -105,7 +83,7 @@ Anki Notes stores its data in a Core Data SQLite database synced via iCloud (Clo
   Data/Library/Application Support/Anki Notes/Model1.sqlite
 ```
 
-Read operations are safe anytime. Write operations (import, restore) require quitting the app first and include Core Data change tracking for proper iCloud sync.
+The database is opened in read-only mode — no risk of data corruption.
 
 ## License
 
