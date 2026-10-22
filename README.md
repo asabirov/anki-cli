@@ -1,8 +1,8 @@
 # anki-notes-cli
 
-CLI for [Anki Notes: Flashcards Maker](https://apps.apple.com/app/anki-notes-flashcards-maker/id1503902660) — manage your flashcards from the terminal: search, review stats, import, export, backup & restore.
+CLI for [Anki Notes: Flashcards Maker](https://apps.apple.com/app/anki-notes-flashcards-maker/id1503902660) — manage your flashcards from the terminal: search, review stats, export, backup & restore.
 
-Read-only access to the app's local SQLite database. No API keys or authentication required.
+Reads the app's local SQLite database. No API keys or authentication required. Every command except `restore` opens the database read-only. `restore` replaces the database, so it makes a safety copy first.
 
 ## Install
 
@@ -54,11 +54,12 @@ anki-notes-cli export --format csv --tag Spanish -o spanish.csv
 anki-notes-cli extract ./output --tag Japanese
 
 # Backup & restore
-anki-notes-cli backup
+anki-notes-cli backup                  # default: ~/.local/share/anki-notes-cli/backups/
+anki-notes-cli backup ~/backup.sqlite
 anki-notes-cli restore ~/backup.sqlite
 ```
 
-All commands support `--json` for machine-readable output and `--db <path>` to override the database location.
+All commands support `--db <path>` to override the database location. `dashboard`, `ls`, `get`, `search` and `tags` also support `--json` for machine-readable output.
 
 ## Commands
 
@@ -67,12 +68,12 @@ All commands support `--json` for machine-readable output and `--db <path>` to o
 | `dashboard` | Stats dashboard: retention, timeline, per-tag table  |
 | `ls`        | List flashcards with filters                         |
 | `get`       | View a flashcard by ID                               |
-| `search`    | Search cards by front/back text                      |
+| `search`    | Search cards by front, back and note text            |
 | `tags`      | List all tags with card counts                       |
 | `export`    | Export cards as JSON, CSV, or TSV                    |
-| `extract`   | Extract all cards to markdown files with media       |
+| `extract`   | Extract cards to markdown files, media and `index.json` |
 | `backup`    | Back up the database (SQLite snapshot)               |
-| `restore`   | Restore the database from a backup                   |
+| `restore`   | Restore the database from a backup. Quit Anki Notes first. Asks for confirmation unless you pass `--force`. |
 
 ## How it works
 
@@ -83,7 +84,7 @@ Anki Notes stores its data in a Core Data SQLite database synced via iCloud (Clo
   Data/Library/Application Support/Anki Notes/Model1.sqlite
 ```
 
-The database is opened in read-only mode — no risk of data corruption.
+Reading commands open the database in read-only mode. `restore` is the only command that writes to it. It first copies the current database to a `.pre-restore-<timestamp>.bak` file next to it. It refuses to run while Anki Notes is open. Afterwards, open the app to sync the restored data to iCloud.
 
 ## License
 
